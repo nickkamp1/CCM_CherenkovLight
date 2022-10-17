@@ -164,14 +164,29 @@ class EventDisplay:
   def PlotAllPMTsTimeSlice(self,
                            eventno,
                            time_slice,
-                           size=300):
+                           size=300,
+                           n=3,
+                           ProcessString=None):
 
     key = self.keys[eventno]
     data_pandas = self.data_uproot[key].arrays(["HitRow","HitPosX","HitPosY","HitPosZ","HitTime","HitCoat"],library="pd")
+    data_pandas["HitCreatorProcess"] = list(self.data_uproot[key]["HitCreatorProcess"].array())[0]
+    if(ProcessString is not None): 
+      data_pandas = data_pandas.query("HitCreatorProcess==@ProcessString")
     
-    fig,ax = plt.subplots(3,1,gridspec_kw={'height_ratios':[1,1,1]},figsize=(6,18))
+    fig = plt.figure(figsize=(3*n,3*n))
+    ax = [plt.subplot2grid(shape=(n,n),loc=(0,1),colspan=1),
+          plt.subplot2grid(shape=(n,n),loc=(1,0),colspan=3),
+          plt.subplot2grid(shape=(n,n),loc=(2,1),colspan=1),
+          plt.subplot2grid(shape=(n,n),loc=(0,0),colspan=1)]
+    
     
     self.UpdatePlotAllPMTsTimeSlice(ax,data_pandas,time_slice)
+    
+    title = ProcessString if ProcessString is not None else ''
+    title += '\n{:.1f} < t < {:.1f}'.format(time_slice[0],time_slice[1])
+    ax[3].axis('off')
+    ax[3].text(-0.50,0.1,title)
     
     plt.show()
 
@@ -181,11 +196,15 @@ class EventDisplay:
                          time_max=100,
                          size=200,
                          n = 3,
-                         interval=100):
+                         interval=100,
+                         ProcessString=None):
 
     
     key = self.keys[eventno]
     data_pandas = self.data_uproot[key].arrays(["HitRow","HitPosX","HitPosY","HitPosZ","HitTime","HitCoat"],library="pd")
+    data_pandas["HitCreatorProcess"] = list(self.data_uproot[key]["HitCreatorProcess"].array())[0]
+    if(ProcessString is not None): 
+      data_pandas = data_pandas.query("HitCreatorProcess==@ProcessString")
     time_bins = np.arange(0,time_max,time_width)
     
     
@@ -199,9 +218,10 @@ class EventDisplay:
     def AnimationFunction(frame):
       time_slice=(time_bins[frame],time_bins[frame+1])
       self.UpdatePlotAllPMTsTimeSlice(ax,data_pandas,time_slice)
-      title = '{:.1f} < t < {:.1f}'.format(time_bins[frame],time_bins[frame+1])
+      title = ProcessString if ProcessString is not None else ''
+      title += '\n{:.1f} < t < {:.1f}'.format(time_bins[frame],time_bins[frame+1])
       ax[3].axis('off')
-      ax[3].text(-0.50,0,title)
+      ax[3].text(-0.50,0.1,title)
       
 
     
