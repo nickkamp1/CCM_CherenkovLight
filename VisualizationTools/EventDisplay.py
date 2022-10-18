@@ -63,7 +63,8 @@ class EventDisplay:
     plt.show()
 
   def GetCoatedUncoatedScatterDataTopBottom(self,
-                                            data):
+                                            data,
+                                            Top=True):
     hits = {}
     uncoated = {}
     for x,y,c in np.array(data[["HitPosX","HitPosY","HitCoat"]]):
@@ -77,12 +78,12 @@ class EventDisplay:
     clist_c,clist_u = [],[]
     for (x,y) in hits.keys():
       if uncoated[(x,y)]:
-        xlist_u.append(x)
-        ylist_u.append(y)
+        xlist_u.append(y)
+        ylist_u.append(-x if Top else x)
         clist_u.append(hits[(x,y)])
       else:
-        xlist_c.append(x)
-        ylist_c.append(y)
+        xlist_c.append(y)
+        ylist_c.append(-x if Top else x)
         clist_c.append(hits[(x,y)])
     
     return xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c
@@ -121,14 +122,15 @@ class EventDisplay:
                                  ax,
                                  data_pandas,
                                  time_slice,
-                                 size=200):
+                                 size=200,
+                                 vmax=20):
     
     ax[0].clear()
     ax[1].clear()
     ax[2].clear()
-    ax[0].set_title("Top")
-    ax[1].set_title("Sides")
-    ax[2].set_title("Bottom")
+    #ax[0].set_title("Top")
+    #ax[1].set_title("Sides")
+    #ax[2].set_title("Bottom")
     ax[3].clear()
     ax[0].set_xlim(-95,95)
     ax[0].set_ylim(-95,95)
@@ -143,30 +145,31 @@ class EventDisplay:
     data_slice = data_pandas.query("HitTime>@tmin and HitTime<@tmax")
     
     # Top PMTs
-    data_top = data_slice.query("HitRow==6")
+    data_top = data_slice.query("HitRow==0")
     xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_top)
     ax[0].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=3,vmin=0,vmax=10)
-    ax[0].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=10)
+    ax[0].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=vmax)
     
     # Side PMTs
     data_side = data_slice.query("HitRow>0 and HitRow<6")
     xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataSide(data_side)
     #ax[1].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=3)
-    ax[1].scatter(xlist_u,ylist_u,s=size,c=clist_u,vmin=0,vmax=10)
-    ax[1].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=10)
+    ax[1].scatter(xlist_u,ylist_u,s=size,c=clist_u,vmin=0,vmax=vmax)
+    ax[1].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=vmax)
     
     # Bottom PMTs
-    data_bottom = data_slice.query("HitRow==0")
-    xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_bottom)
+    data_bottom = data_slice.query("HitRow==6")
+    xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_bottom,Top=False)
     ax[2].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=3,vmin=0,vmax=100)
-    ax[2].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=10)
+    ax[2].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=vmax)
   
   def PlotAllPMTsTimeSlice(self,
                            eventno,
                            time_slice,
                            size=300,
                            n=3,
-                           ProcessString=None):
+                           ProcessString=None,
+                           SaveString=None):
 
     key = self.keys[eventno]
     data_pandas = self.data_uproot[key].arrays(["HitRow","HitPosX","HitPosY","HitPosZ","HitTime","HitCoat"],library="pd")
@@ -184,9 +187,11 @@ class EventDisplay:
     self.UpdatePlotAllPMTsTimeSlice(ax,data_pandas,time_slice)
     
     title = ProcessString if ProcessString is not None else ''
-    title += '\n{:.1f} < t < {:.1f}'.format(time_slice[0],time_slice[1])
+    title += '\n{:.1f} $<$ t $<$ {:.1f}'.format(time_slice[0],time_slice[1])
     ax[3].axis('off')
     ax[3].text(-0.50,0.1,title)
+    
+    if(SaveString is not None): plt.savefig(SaveString)
     
     plt.show()
 
