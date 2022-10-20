@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from IPython import display
@@ -150,6 +151,7 @@ class EventDisplay:
     ax[0].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=3,vmin=0,vmax=10)
     ax[0].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=vmax)
     
+    
     # Side PMTs
     data_side = data_slice.query("HitRow>0 and HitRow<6")
     xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataSide(data_side)
@@ -169,7 +171,8 @@ class EventDisplay:
                            size=300,
                            n=3,
                            ProcessString=None,
-                           SaveString=None):
+                           SaveString=None,
+                           vmax=20):
 
     key = self.keys[eventno]
     data_pandas = self.data_uproot[key].arrays(["HitRow","HitPosX","HitPosY","HitPosZ","HitTime","HitCoat"],library="pd")
@@ -181,15 +184,20 @@ class EventDisplay:
     ax = [plt.subplot2grid(shape=(n,n),loc=(0,1),colspan=1),
           plt.subplot2grid(shape=(n,n),loc=(1,0),colspan=3),
           plt.subplot2grid(shape=(n,n),loc=(2,1),colspan=1),
-          plt.subplot2grid(shape=(n,n),loc=(0,0),colspan=1)]
+          plt.subplot2grid(shape=(n,n),loc=(0,2),colspan=1)]
     
     
-    self.UpdatePlotAllPMTsTimeSlice(ax,data_pandas,time_slice)
+    self.UpdatePlotAllPMTsTimeSlice(ax,data_pandas,time_slice,vmax=vmax)
+    
+    axes = fig.add_axes([0.67, 0.70, 0.22, 0.03])
+    cb = mpl.colorbar.ColorbarBase(axes, orientation='horizontal', 
+                                   norm=mpl.colors.Normalize(0, vmax),  # vmax and vmin
+                                   label='Number of Hits')
     
     title = ProcessString if ProcessString is not None else ''
-    title += '\n{:.1f} $<$ t $<$ {:.1f}'.format(time_slice[0],time_slice[1])
+    title += '\n{} $<$ t [ns] $<$ {}'.format(time_slice[0],time_slice[1])
     ax[3].axis('off')
-    ax[3].text(-0.50,0.1,title)
+    ax[3].text(-0.80,0.1,title)
     
     if(SaveString is not None): plt.savefig(SaveString)
     
