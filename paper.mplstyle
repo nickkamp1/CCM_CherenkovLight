@@ -1,7 +1,7 @@
 figure.figsize   : 5, 5   # figure size in inches
 savefig.dpi      : 600      # figure dots per inch
 
-image.cmap : cool
+image.cmap : Blues
 
 font.size: 18
 font.family: serif
