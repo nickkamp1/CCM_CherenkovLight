@@ -6,9 +6,8 @@ from IPython import display
 import uproot
 import pandas as pd
 
-from MLE import Dataset 
+from AnalysisTools.MLE import Dataset,smear_time 
 
-hc = 197.3 * 2 * np.pi #eV nm
 
 '''
 Expects a ROOT file formated according to CCMDumpSimulation
@@ -122,12 +121,7 @@ class EventDisplay:
     
     return xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c
 
-  def UpdatePlotAllPMTsTimeSlice(self,
-                                 ax,
-                                 data_pandas,
-                                 time_slice,
-                                 size=200,
-                                 vmax=20):
+  def ResetEDaxes(self,ax):
     
     ax[0].clear()
     ax[1].clear()
@@ -144,6 +138,16 @@ class EventDisplay:
     ax[2].set_ylim(-95,95)
     ax[3].set_xlim(-1,1)
     ax[3].set_ylim(-1,1)
+    
+  
+  def UpdatePlotAllPMTsTimeSlice(self,
+                                 ax,
+                                 data_pandas,
+                                 time_slice,
+                                 size=200,
+                                 vmax=20):
+    
+    self.ResetEDaxes(ax)
     
     tmin,tmax = time_slice
     data_slice = data_pandas.query("HitTime>@tmin and HitTime<@tmax")
@@ -210,10 +214,12 @@ class EventDisplay:
                          eventno,
                          time_width=2,
                          time_max=100,
-                         size=200,
+                         size=300,
                          n = 3,
                          interval=100,
-                         ProcessString=None):
+                         ProcessString=None,
+                         SaveString=None,
+                         Display=False):
 
     
     key = self.keys[eventno]
@@ -235,7 +241,7 @@ class EventDisplay:
       time_slice=(time_bins[frame],time_bins[frame+1])
       self.UpdatePlotAllPMTsTimeSlice(ax,data_pandas,time_slice)
       title = ProcessString if ProcessString is not None else ''
-      title += '\n{:.1f} < t < {:.1f}'.format(time_bins[frame],time_bins[frame+1])
+      title += '\n{} $<$ t [ns] $<$ {}'.format(time_bins[frame],time_bins[frame+1])
       ax[3].axis('off')
       ax[3].text(-0.50,0.1,title)
       
@@ -243,15 +249,91 @@ class EventDisplay:
     
     anim_created = FuncAnimation(fig, AnimationFunction, frames=len(time_bins)-1, interval=interval)
 
-    video = anim_created.to_html5_video()
-    html = display.HTML(video)
-    display.display(html)
+    if Display:
+      video = anim_created.to_html5_video()
+      html = display.HTML(video)
+      display.display(html)
 
+    if(SaveString is not None): anim_created.save(SaveString,dpi=300)
+    
     plt.close()
     
     return anim_created
 
-  def PlotAvgTemplate
+  def CalculateAvgTemplate(self,
+                           nMax=np.inf,
+                           ProcessString=None,
+                           time_bins=np.linspace(0,10,6)):
+    
+    self.time_bins = time_bins
+    pmt_pos,avg_hit_template,pmt_coat = self.MLE_dataset.GetAverageResponse(time_bins=time_bins,nMax=nMax,ProcessString=ProcessString)
+    
+    def GetXY(x,y,z,loc):
+      if loc=='sides':
+        r = np.sqrt(x**2 + y**2)
+        theta = np.arctan(y/x)
+        if(x<0 and y>0): theta += np.pi
+        if(x<0 and y<0): theta -= np.pi 
+        return r*theta,z
+      elif loc=='top':
+        return y,-x
+      elif loc=='bottom':
+        return y,x
+    
+    self.xlist = {'top':[],
+                  'sides':[],
+                  'bottom':[]}
+    self.ylist = {'top':[],
+                  'sides':[],
+                  'bottom':[]}
+    self.clist = {'top':[[] for _ in range(len(time_bins)-1)],
+                  'sides':[[] for _ in range(len(time_bins)-1)],
+                  'bottom':[[] for _ in range(len(time_bins)-1)]}
+    for (r,c),rate in avg_hit_template.items():
+      if r==0: loc='top'
+      elif r==6: loc='bottom'
+      else: loc='sides'
+      x,y = GetXY(*pmt_pos[(r,c)],loc=loc)
+      self.xlist[loc].append(x)
+      self.ylist[loc].append(y)
+      for i,val in enumerate(rate): self.clist[loc][i].append(val)
+  
+  def PlotAvgTemplate(self,
+                      time_bin,
+                      size=200,
+                      n=3,
+                      ProcessString=None,
+                      SaveString=None,
+                      vmax=20):
+  
+    
+    fig = plt.figure(figsize=(3*n,3*n))
+    ax = [plt.subplot2grid(shape=(n,n),loc=(0,1),colspan=1),
+          plt.subplot2grid(shape=(n,n),loc=(1,0),colspan=3),
+          plt.subplot2grid(shape=(n,n),loc=(2,1),colspan=1),
+          plt.subplot2grid(shape=(n,n),loc=(0,2),colspan=1)]
+     
+    
+    self.ResetEDaxes(ax)
+    for i,loc in enumerate(['top','sides','bottom']):
+      ax[i].scatter(self.xlist[loc],self.ylist[loc],c=self.clist[loc][time_bin],s=size,vmin=0,vmax=vmax)
+  
+      axes = fig.add_axes([0.67, 0.70, 0.22, 0.03])
+      cb = mpl.colorbar.ColorbarBase(axes, orientation='horizontal', 
+                                     norm=mpl.colors.Normalize(0, vmax),  # vmax and vmin
+                                     label='Number of Hits')
+      
+    title = ProcessString if ProcessString is not None else 'All Photons'
+    title += '\n{} $<$ t [ns] $<$ {}'.format(self.time_bins[time_bin],self.time_bins[time_bin+1])
+    ax[3].axis('off')
+    ax[3].text(-0.80,0.1,title)
+
+    plt.show()
+    
+    
+
+
+
 
 
 
