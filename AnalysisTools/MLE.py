@@ -1,6 +1,7 @@
 import numpy as np
 import uproot
 import pandas as pd
+from scipy.special import factorial
 
 PMTmap_file = '/home/nwkamp/Research/CCM/CherenkovLight/CCMAnalysisPublic/Config/mapping_master_7-14-22.csv'
 hc = 197.3 * 2 * np.pi #eV nm
@@ -8,12 +9,14 @@ hc = 197.3 * 2 * np.pi #eV nm
 def get_idx(t,time_bins):
   return np.argmax(t<time_bins)-1
 
-def smear_time(t,sigma_t=2.6):
+def smear_time(t,rise_time=2.5):
+  return t + np.random.normal(loc=rise_time/2,scale=rise_time/2)
+  '''
   st = -1*np.ones_like(t)
   while np.any(st < 0):
     st = np.where(st<0,np.random.normal(loc=t,scale=sigma_t),st)
   return st
-
+  '''
 
 '''
 Expects a pandas dataframe with information on Hit positions, timing, and wavelength
@@ -32,7 +35,8 @@ expected keys:
 class DetectorModel:
 
   def __init__(self,
-               data_pandas):
+               data_pandas,
+               seed=None):
     self.data_pandas = data_pandas
     self.pmt_map = pd.read_csv(PMTmap_file)
     self.data_pandas['HitWavelength'] = hc / self.data_pandas['HitEnergy']
@@ -41,8 +45,10 @@ class DetectorModel:
       pmt_keys.append('C'+str(c)+'R'+str(r))
     self.data_pandas['Position'] = pmt_keys
     self.orig_keys = list(self.data_pandas.keys())
+    self.seed = seed
 
   def SmearTime(self):
+    if self.seed is not None: np.random.seed(self.seed)
     self.data_pandas['HitTimeSmeared'] = smear_time(self.data_pandas['HitTime'])
     self.orig_keys += ['HitTimeSmeared']
 
@@ -84,20 +90,62 @@ Extracted using uproot
 '''
 class Dataset:
   
-  def __init__(self,dataFileName):
+  def __init__(self,dataFileName,time_bins=np.linspace(0,10,6)):
     self.data_uproot = uproot.open(dataFileName)
     self.keys = self.data_uproot.keys()
+    self.time_bins = time_bins
+
+  def GetDetectorEvent(self,
+                       evenno,
+                       seed=None):
+    data_pandas = self.data_uproot[self.keys[evenno]].arrays(["HitPosX","HitPosY","HitPosZ","HitRow","HitCol","HitTime","HitEnergy"],library="pd")
+    data_pandas["HitCreatorProcess"] = list(self.data_uproot[self.keys[evenno]]["HitCreatorProcess"].array())[0]
+    DetModel = DetectorModel(data_pandas,seed=seed)
+    DetModel.ApplyDetectorEffects()
+    if seed is not None: np.random.seed(seed)
+    det_rand_arr = np.random.uniform(size=len(DetModel.data_pandas))
+    DetModel.data_pandas["Detected"] = det_rand_arr < DetModel.data_pandas["DetEff"]
+    return DetModel.data_pandas
+  
+  def GetEventMap(self,
+                  evenno):
+    data_pandas = self.GetDetectorEvent(evenno)
+    data_pandas.query("Detected==1",inplace=True)
+    event_map = {}
+    for r,c,t in np.array(data_pandas[["HitRow","HitCol","HitTimeSmeared"]]):
+      pmt_key = (r,c)
+      if pmt_key not in event_map.keys(): event_map[pmt_key] = np.zeros(len(self.time_bins)-1)
+      event_map[pmt_key][get_idx(t,self.time_bins)] += 1
+    return event_map
+
+
+  
+  def LogLikelihood(self,
+                    evenno,
+                    template=None,
+                    error_on_zero=0.1):
+    if not template: template = self.avg_hit_template
+    event_map = self.GetEventMap(evenno)
+    LLH = 0
+    for key,mu_arr in template.items():
+      if key not in event_map: k_arr = np.zeros(len(self.time_bins)-1)
+      else: k_arr = event_map[key]
+      for k,mu in zip(k_arr,mu_arr):
+        if mu > 0:
+          LLH += (-mu + k*np.log(mu) - np.log(factorial(k)))
+        else:
+          LLH += -k/error_on_zero
+    return LLH
 
   def GetAverageResponse(self,
                          nMax=np.inf,
-                         ProcessString=None,
-                         time_bins=np.linspace(0,10,6)):
+                         ProcessString=None):
     
     self.N = min(nMax,len(self.keys))
-    avg_hit_template = {}
+    self.avg_hit_template = {}
     pmt_pos = {}
     pmt_coat = {}
-    tmin,tmax = time_bins[0],time_bins[-1]
+    tmin,tmax = self.time_bins[0]-5,self.time_bins[-1]+5
     for i,key in enumerate(self.keys):
       if i > nMax: continue
       data_pandas = self.data_uproot[key].arrays(["HitPosX","HitPosY","HitPosZ","HitRow","HitCol","HitTime","HitEnergy"],library="pd")
@@ -109,14 +157,14 @@ class Dataset:
       DetModel.ApplyDetectorEffects()
       for x,y,z,r,c,t,e,coat in np.array(DetModel.data_pandas[["HitPosX","HitPosY","HitPosZ","HitRow","HitCol","HitTimeSmeared","DetEff","Coating"]]):
         pmt_key = (r,c)
-        if pmt_key not in avg_hit_template.keys():
+        if pmt_key not in self.avg_hit_template.keys():
           pmt_pos[pmt_key] = [x,y,z]
           pmt_coat[pmt_key] = 0 if coat=='U' else 1
-          avg_hit_template[pmt_key] = np.zeros(len(time_bins)-1)
-        tbin = get_idx(t,time_bins)
-        if(tbin!=-1): avg_hit_template[pmt_key][tbin] += e/self.N
+          self.avg_hit_template[pmt_key] = np.zeros(len(self.time_bins)-1)
+        tbin = get_idx(t,self.time_bins)
+        if(tbin!=-1): self.avg_hit_template[pmt_key][tbin] += e/self.N
 
-    return pmt_pos,avg_hit_template,pmt_coat
+    return pmt_pos,self.avg_hit_template,pmt_coat
 
 
 

@@ -6,7 +6,7 @@ from IPython import display
 import uproot
 import pandas as pd
 
-from AnalysisTools.MLE import Dataset,smear_time 
+from AnalysisTools.MLE import DetectorModel,Dataset,smear_time 
 
 
 '''
@@ -15,13 +15,13 @@ Extracted using uproot
 '''
 class EventDisplay:
   
-  def __init__(self,dataFileName):
+  def __init__(self,dataFileName,time_bins):
     self.data_uproot = uproot.open(dataFileName)
     self.keys = self.data_uproot.keys()
-    self.MLE_dataset = Dataset(dataFileName) 
+    self.MLE_dataset = Dataset(dataFileName,time_bins=time_bins)
+    self.time_bins=time_bins
 
   def PlotPMTHitsVsTime(self,eventno,PMTid,
-                        time_bins=np.linspace(0,20,100),
                         stacked=False):
     
     key = self.keys[eventno]
@@ -37,44 +37,44 @@ class EventDisplay:
       histlist.append(data_pandas_PMT["HitTime"])
       timelist+= list(data_pandas_PMT["HitTime"])
     
-    if(stacked): plt.hist(histlist,bins=time_bins,stacked=True)
-    else: plt.hist(timelist,bins=time_bins)
+    if(stacked): plt.hist(histlist,bins=self.time_bins,stacked=True)
+    else: plt.hist(timelist,bins=self.time_bins)
     plt.show()
   
   def PlotAllHitsVsTime(self,
-                        eventno,
-                        time_bins=np.linspace(0,20,100)):
+                        eventno):
     
     key = self.keys[eventno]
     data_pandas = self.data_uproot[key].arrays(["HitTime"],library="pd")
     
-    plt.hist(data_pandas["HitTime"],bins=time_bins)
+    plt.hist(data_pandas["HitTime"],bins=self.time_bins)
     plt.show()
   
   def PlotCoatedVsUncoatedHitsVsTime(self,
-                                     eventno,
-                                     time_bins=np.linspace(0,20,100)):
+                                     eventno):
     
     key = self.keys[eventno]
     data_pandas = self.data_uproot[key].arrays(["HitTime","HitCoat"],library="pd")
     data_coat = data_pandas.query("HitCoat==0")
     data_uncoat = data_pandas.query("HitCoat==1")
     
-    plt.hist(data_coat["HitTime"],bins=time_bins,label="Coated",histtype='step')
-    plt.hist(data_uncoat["HitTime"],bins=time_bins,label="Uncoated",histtype='step')
+    plt.hist(data_coat["HitTime"],bins=self.time_bins,label="Coated",histtype='step')
+    plt.hist(data_uncoat["HitTime"],bins=self.time_bins,label="Uncoated",histtype='step')
     plt.legend()
     plt.show()
 
   def GetCoatedUncoatedScatterDataTopBottom(self,
                                             data,
+                                            DetReco=False,
                                             Top=True):
     hits = {}
     uncoated = {}
-    for x,y,c in np.array(data[["HitPosX","HitPosY","HitCoat"]]):
+    for x,y,c,d in np.array(data[["HitPosX","HitPosY","Coating","Detected"]]):
       if((x,y) not in hits):
         hits[(x,y)] = 0
+      uncoated[(x,y)] = c=='U'
+      if DetReco and not d: continue
       hits[(x,y)]+=1
-      uncoated[(x,y)] = c
 
     xlist_c,xlist_u = [],[]
     ylist_c,ylist_u = [],[]
@@ -92,14 +92,16 @@ class EventDisplay:
     return xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c
   
   def GetCoatedUncoatedScatterDataSide(self,
-                                       data):
+                                       data,
+                                       DetReco=False):
     hits = {}
     uncoated = {}
-    for x,y,z,c in np.array(data[["HitPosX","HitPosY","HitPosZ","HitCoat"]]):
+    for x,y,z,c,d in np.array(data[["HitPosX","HitPosY","HitPosZ","Coating","Detected"]]):
       if((x,y,z) not in hits):
         hits[(x,y,z)] = 0
+      uncoated[(x,y,z)] = c=='U'
+      if DetReco and not d: continue
       hits[(x,y,z)]+=1
-      uncoated[(x,y,z)] = c
 
     xlist_c,xlist_u = [],[]
     ylist_c,ylist_u = [],[]
@@ -126,9 +128,6 @@ class EventDisplay:
     ax[0].clear()
     ax[1].clear()
     ax[2].clear()
-    #ax[0].set_title("Top")
-    #ax[1].set_title("Sides")
-    #ax[2].set_title("Bottom")
     ax[3].clear()
     ax[0].set_xlim(-95,95)
     ax[0].set_ylim(-95,95)
@@ -145,32 +144,35 @@ class EventDisplay:
                                  data_pandas,
                                  time_slice,
                                  size=200,
-                                 vmax=20):
+                                 vmax=20,
+                                 DetReco=False):
     
     self.ResetEDaxes(ax)
     
     tmin,tmax = time_slice
-    data_slice = data_pandas.query("HitTime>@tmin and HitTime<@tmax")
+    if DetReco:
+      data_slice = data_pandas.query("HitTimeSmeared>@tmin and HitTimeSmeared<@tmax")
+    else:
+      data_slice = data_pandas.query("HitTime>@tmin and HitTime<@tmax")
     
     # Top PMTs
     data_top = data_slice.query("HitRow==0")
-    xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_top)
-    ax[0].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=3,vmin=0,vmax=10)
-    ax[0].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=vmax)
+    xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_top,DetReco=DetReco)
+    ax[0].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=10)
+    ax[0].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax)
     
     
     # Side PMTs
     data_side = data_slice.query("HitRow>0 and HitRow<6")
-    xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataSide(data_side)
-    #ax[1].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=3)
-    ax[1].scatter(xlist_u,ylist_u,s=size,c=clist_u,vmin=0,vmax=vmax)
-    ax[1].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=vmax)
+    xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataSide(data_side,DetReco=DetReco)
+    ax[1].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=vmax)
+    ax[1].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax)
     
     # Bottom PMTs
     data_bottom = data_slice.query("HitRow==6")
-    xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_bottom,Top=False)
-    ax[2].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=3,vmin=0,vmax=100)
-    ax[2].scatter(xlist_c,ylist_c,s=size,c=clist_c,vmin=0,vmax=vmax)
+    xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_bottom,DetReco=DetReco,Top=False)
+    ax[2].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=vmax)
+    ax[2].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax)
   
   def PlotAllPMTsTimeSlice(self,
                            eventno,
@@ -179,14 +181,14 @@ class EventDisplay:
                            n=3,
                            ProcessString=None,
                            SaveString=None,
-                           vmax=20):
+                           vmax=20,
+                           DetReco=False):
 
     key = self.keys[eventno]
-    data_pandas = self.data_uproot[key].arrays(["HitRow","HitPosX","HitPosY","HitPosZ","HitTime","HitCoat"],library="pd")
-    data_pandas["HitCreatorProcess"] = list(self.data_uproot[key]["HitCreatorProcess"].array())[0]
+    data_pandas = self.MLE_dataset.GetDetectorEvent(eventno)
     if(ProcessString is not None): 
       data_pandas = data_pandas.query("HitCreatorProcess==@ProcessString")
-    
+
     fig = plt.figure(figsize=(3*n,3*n))
     ax = [plt.subplot2grid(shape=(n,n),loc=(0,1),colspan=1),
           plt.subplot2grid(shape=(n,n),loc=(1,0),colspan=3),
@@ -194,7 +196,7 @@ class EventDisplay:
           plt.subplot2grid(shape=(n,n),loc=(0,2),colspan=1)]
     
     
-    self.UpdatePlotAllPMTsTimeSlice(ax,data_pandas,time_slice,vmax=vmax)
+    self.UpdatePlotAllPMTsTimeSlice(ax,data_pandas,time_slice,vmax=vmax,DetReco=DetReco)
     
     axes = fig.add_axes([0.67, 0.70, 0.22, 0.03])
     cb = mpl.colorbar.ColorbarBase(axes, orientation='horizontal', 
@@ -262,11 +264,9 @@ class EventDisplay:
 
   def CalculateAvgTemplate(self,
                            nMax=np.inf,
-                           ProcessString=None,
-                           time_bins=np.linspace(0,10,6)):
+                           ProcessString=None):
     
-    self.time_bins = time_bins
-    pmt_pos,avg_hit_template,pmt_coat = self.MLE_dataset.GetAverageResponse(time_bins=time_bins,nMax=nMax,ProcessString=ProcessString)
+    pmt_pos,avg_hit_template,pmt_coat = self.MLE_dataset.GetAverageResponse(nMax=nMax,ProcessString=ProcessString)
     
     def GetXY(x,y,z,loc):
       if loc=='sides':
@@ -280,23 +280,38 @@ class EventDisplay:
       elif loc=='bottom':
         return y,x
     
-    self.xlist = {'top':[],
-                  'sides':[],
-                  'bottom':[]}
-    self.ylist = {'top':[],
-                  'sides':[],
-                  'bottom':[]}
-    self.clist = {'top':[[] for _ in range(len(time_bins)-1)],
-                  'sides':[[] for _ in range(len(time_bins)-1)],
-                  'bottom':[[] for _ in range(len(time_bins)-1)]}
+    self.avg_xlist_coat = {'top':[],
+                           'sides':[],
+                           'bottom':[]}
+    self.avg_ylist_coat = {'top':[],
+                           'sides':[],
+                           'bottom':[]}
+    self.avg_clist_coat = {'top':[[] for _ in range(len(self.time_bins)-1)],
+                           'sides':[[] for _ in range(len(self.time_bins)-1)],
+                           'bottom':[[] for _ in range(len(self.time_bins)-1)]}
+    self.avg_xlist_uncoat = {'top':[],
+                             'sides':[],
+                             'bottom':[]}
+    self.avg_ylist_uncoat = {'top':[],
+                             'sides':[],
+                             'bottom':[]}
+    self.avg_clist_uncoat = {'top':[[] for _ in range(len(self.time_bins)-1)],
+                             'sides':[[] for _ in range(len(self.time_bins)-1)],
+                             'bottom':[[] for _ in range(len(self.time_bins)-1)]}
     for (r,c),rate in avg_hit_template.items():
       if r==0: loc='top'
       elif r==6: loc='bottom'
       else: loc='sides'
       x,y = GetXY(*pmt_pos[(r,c)],loc=loc)
-      self.xlist[loc].append(x)
-      self.ylist[loc].append(y)
-      for i,val in enumerate(rate): self.clist[loc][i].append(val)
+      if pmt_coat[(r,c)]:
+        self.avg_xlist_coat[loc].append(x)
+        self.avg_ylist_coat[loc].append(y)
+        for i,val in enumerate(rate): self.avg_clist_coat[loc][i].append(val)
+      else:
+        self.avg_xlist_uncoat[loc].append(x)
+        self.avg_ylist_uncoat[loc].append(y)
+        for i,val in enumerate(rate): self.avg_clist_uncoat[loc][i].append(val)
+    return avg_hit_template
   
   def PlotAvgTemplate(self,
                       time_bin,
@@ -316,12 +331,14 @@ class EventDisplay:
     
     self.ResetEDaxes(ax)
     for i,loc in enumerate(['top','sides','bottom']):
-      ax[i].scatter(self.xlist[loc],self.ylist[loc],c=self.clist[loc][time_bin],s=size,vmin=0,vmax=vmax)
+      ax[i].scatter(self.avg_xlist_coat[loc],self.avg_ylist_coat[loc],c=self.avg_clist_coat[loc][time_bin],s=size,vmin=0,vmax=vmax,edgecolors='black',linewidths=1)
+    for i,loc in enumerate(['top','sides','bottom']):
+      ax[i].scatter(self.avg_xlist_uncoat[loc],self.avg_ylist_uncoat[loc],c=self.avg_clist_uncoat[loc][time_bin],s=size,vmin=0,vmax=vmax,edgecolors='black',linewidths=1,linestyle='--')
   
-      axes = fig.add_axes([0.67, 0.70, 0.22, 0.03])
-      cb = mpl.colorbar.ColorbarBase(axes, orientation='horizontal', 
-                                     norm=mpl.colors.Normalize(0, vmax),  # vmax and vmin
-                                     label='Number of Hits')
+    axes = fig.add_axes([0.67, 0.70, 0.22, 0.03])
+    cb = mpl.colorbar.ColorbarBase(axes, orientation='horizontal', 
+                                   norm=mpl.colors.Normalize(0, vmax),  # vmax and vmin
+                                   label='Number of Hits')
       
     title = ProcessString if ProcessString is not None else 'All Photons'
     title += '\n{} $<$ t [ns] $<$ {}'.format(self.time_bins[time_bin],self.time_bins[time_bin+1])
