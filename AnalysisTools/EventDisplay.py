@@ -5,6 +5,7 @@ from matplotlib.animation import FuncAnimation
 from IPython import display
 import uproot
 import pandas as pd
+import json,codecs
 
 from AnalysisTools.MLE import DetectorModel,Dataset,smear_time 
 
@@ -264,9 +265,14 @@ class EventDisplay:
 
   def CalculateAvgTemplate(self,
                            nMax=np.inf,
-                           ProcessString=None):
+                           ProcessString=None,
+                           template_string=None):
     
-    pmt_pos,avg_hit_template,pmt_coat = self.MLE_dataset.GetAverageResponse(nMax=nMax,ProcessString=ProcessString)
+    if template_string:
+      pmt_pos = json.loads(codecs.open('/home/nwkamp/Research/CCM/CherenkovLight/AverageTemplates/pmt_pos_template.json','r',encoding='utf-8').read())
+      pmt_coat = json.loads(codecs.open('/home/nwkamp/Research/CCM/CherenkovLight/AverageTemplates/pmt_coat_template.json','r',encoding='utf-8').read())
+      avg_hit_template = json.loads(codecs.open(template_string,'r',encoding='utf-8').read())
+    else: pmt_pos,avg_hit_template,pmt_coat = self.MLE_dataset.GetAverageResponse(nMax=nMax,ProcessString=ProcessString)
     
     def GetXY(x,y,z,loc):
       if loc=='sides':
@@ -298,12 +304,13 @@ class EventDisplay:
     self.avg_clist_uncoat = {'top':[[] for _ in range(len(self.time_bins)-1)],
                              'sides':[[] for _ in range(len(self.time_bins)-1)],
                              'bottom':[[] for _ in range(len(self.time_bins)-1)]}
-    for (r,c),rate in avg_hit_template.items():
+    for pmt_key,rate in avg_hit_template.items():
+      r = int(pmt_key[-1])
       if r==0: loc='top'
       elif r==6: loc='bottom'
       else: loc='sides'
-      x,y = GetXY(*pmt_pos[(r,c)],loc=loc)
-      if pmt_coat[(r,c)]:
+      x,y = GetXY(*pmt_pos[pmt_key],loc=loc)
+      if pmt_coat[pmt_key]:
         self.avg_xlist_coat[loc].append(x)
         self.avg_ylist_coat[loc].append(y)
         for i,val in enumerate(rate): self.avg_clist_coat[loc][i].append(val)

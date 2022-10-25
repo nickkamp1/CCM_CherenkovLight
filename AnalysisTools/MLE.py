@@ -94,6 +94,7 @@ class Dataset:
     self.data_uproot = uproot.open(dataFileName)
     self.keys = self.data_uproot.keys()
     self.time_bins = time_bins
+    self.event_map_dict = {}
 
   def GetDetectorEvent(self,
                        evenno,
@@ -109,32 +110,35 @@ class Dataset:
   
   def GetEventMap(self,
                   evenno):
+    if evenno in self.event_map_dict:
+      return self.event_map_dict[evenno]
     data_pandas = self.GetDetectorEvent(evenno)
     data_pandas.query("Detected==1",inplace=True)
     event_map = {}
-    for r,c,t in np.array(data_pandas[["HitRow","HitCol","HitTimeSmeared"]]):
-      pmt_key = (r,c)
+    for pmt_key,r,c,t in np.array(data_pandas[["Position","HitRow","HitCol","HitTimeSmeared"]]):
+      #pmt_key = (r,c)
       if pmt_key not in event_map.keys(): event_map[pmt_key] = np.zeros(len(self.time_bins)-1)
       event_map[pmt_key][get_idx(t,self.time_bins)] += 1
+    self.event_map_dict[evenno] = event_map
     return event_map
 
 
   
   def LogLikelihood(self,
                     evenno,
-                    template=None,
-                    error_on_zero=0.1):
+                    prob_one = None,
+                    template=None):
     if not template: template = self.avg_hit_template
+    if not prob_one: prob_one = 1./len(self.keys)
     event_map = self.GetEventMap(evenno)
     LLH = 0
     for key,mu_arr in template.items():
       if key not in event_map: k_arr = np.zeros(len(self.time_bins)-1)
       else: k_arr = event_map[key]
       for k,mu in zip(k_arr,mu_arr):
-        if mu > 0:
-          LLH += (-mu + k*np.log(mu) - np.log(factorial(k)))
-        else:
-          LLH += -k/error_on_zero
+        if mu <= 0: 
+          mu = prob_one
+        LLH += (-mu + k*np.log(mu) - np.log(factorial(k)))
     return LLH
 
   def GetAverageResponse(self,
@@ -147,6 +151,7 @@ class Dataset:
     pmt_coat = {}
     tmin,tmax = self.time_bins[0]-5,self.time_bins[-1]+5
     for i,key in enumerate(self.keys):
+      print('%i out of %i'%(i,self.N),end='\r')
       if i > nMax: continue
       data_pandas = self.data_uproot[key].arrays(["HitPosX","HitPosY","HitPosZ","HitRow","HitCol","HitTime","HitEnergy"],library="pd")
       if(ProcessString is not None):
@@ -155,8 +160,8 @@ class Dataset:
       data_pandas.query('HitTime>@tmin and HitTime<@tmax',inplace=True)
       DetModel = DetectorModel(data_pandas)
       DetModel.ApplyDetectorEffects()
-      for x,y,z,r,c,t,e,coat in np.array(DetModel.data_pandas[["HitPosX","HitPosY","HitPosZ","HitRow","HitCol","HitTimeSmeared","DetEff","Coating"]]):
-        pmt_key = (r,c)
+      for x,y,z,pmt_key,r,c,t,e,coat in np.array(DetModel.data_pandas[["HitPosX","HitPosY","HitPosZ","Position","HitRow","HitCol","HitTimeSmeared","DetEff","Coating"]]):
+        #pmt_key = (r,c)
         if pmt_key not in self.avg_hit_template.keys():
           pmt_pos[pmt_key] = [x,y,z]
           pmt_coat[pmt_key] = 0 if coat=='U' else 1
