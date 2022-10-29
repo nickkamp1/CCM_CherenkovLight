@@ -1,13 +1,16 @@
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib import cm
+plt.style.use('paper.mplstyle')
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import ListedColormap
 from IPython import display
 import uproot
 import pandas as pd
 import json,codecs
 
-from AnalysisTools.MLE import DetectorModel,Dataset,smear_time 
+from AnalysisTools.MLE import DetectorModel,Dataset 
 
 
 '''
@@ -21,6 +24,14 @@ class EventDisplay:
     self.keys = self.data_uproot.keys()
     self.MLE_dataset = Dataset(dataFileName,time_bins=time_bins)
     self.time_bins=time_bins
+    self.detector_events = {}
+    self.PMTpos = {}
+    self.PMTuncoated = {}
+    for evenno in range(2):
+      event = data_pandas = self.MLE_dataset.GetDetectorEvent(evenno) 
+      for r,c,x,y,z,coat in np.array(event[["HitRow","HitCol","HitPosX","HitPosY","HitPosZ","Coating"]]):
+        self.PMTpos[(r,c)] = [x,y,z]
+        self.PMTuncoated[(x,y,z)] = coat=='U'
 
   def PlotPMTHitsVsTime(self,eventno,PMTid,
                         stacked=False):
@@ -64,72 +75,86 @@ class EventDisplay:
     plt.legend()
     plt.show()
 
+  def GetEmptyHitsDict(self,mode=''):
+    hits = {}
+    for (r,c) in self.PMTpos.keys():
+      if mode=='sides':
+        if r==0 or r==6: continue
+      if mode=='top':
+        if r!=0: continue
+      if mode=='bottom':
+        if r!=6: continue
+      hits[(r,c)] = 0
+    return hits
+
   def GetCoatedUncoatedScatterDataTopBottom(self,
                                             data,
                                             DetReco=False,
                                             Top=True):
-    hits = {}
-    uncoated = {}
-    for x,y,c,d in np.array(data[["HitPosX","HitPosY","Coating","Detected"]]):
-      if((x,y) not in hits):
-        hits[(x,y)] = 0
-      uncoated[(x,y)] = c=='U'
+    hits = self.GetEmptyHitsDict(mode='top' if Top else 'bottom')
+
+    for r,c,d in np.array(data[["HitRow","HitCol","Detected"]]):
+      #if (r,c) not in hits.keys(): hits[(r,c)] = 0
       if DetReco and not d: continue
-      hits[(x,y)]+=1
+      hits[(r,c)]+=1
 
     xlist_c,xlist_u = [],[]
     ylist_c,ylist_u = [],[]
     clist_c,clist_u = [],[]
-    for (x,y) in hits.keys():
-      if uncoated[(x,y)]:
+    for (r,c) in hits.keys():
+      x,y,z = self.PMTpos[(r,c)]
+      if self.PMTuncoated[(x,y,z)]:
         xlist_u.append(y)
         ylist_u.append(-x if Top else x)
-        clist_u.append(hits[(x,y)])
+        clist_u.append(hits[(r,c)])
       else:
         xlist_c.append(y)
         ylist_c.append(-x if Top else x)
-        clist_c.append(hits[(x,y)])
+        clist_c.append(hits[(r,c)])
     
     return xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c
   
   def GetCoatedUncoatedScatterDataSide(self,
                                        data,
                                        DetReco=False):
-    hits = {}
-    uncoated = {}
-    for x,y,z,c,d in np.array(data[["HitPosX","HitPosY","HitPosZ","Coating","Detected"]]):
-      if((x,y,z) not in hits):
-        hits[(x,y,z)] = 0
-      uncoated[(x,y,z)] = c=='U'
+    hits = self.GetEmptyHitsDict(mode='sides')
+    
+    for r,c,d in np.array(data[["HitRow","HitCol","Detected"]]):
+      #if (r,c) not in hits.keys(): hits[(r,c)] = 0
       if DetReco and not d: continue
-      hits[(x,y,z)]+=1
+      hits[(r,c)]+=1
 
     xlist_c,xlist_u = [],[]
     ylist_c,ylist_u = [],[]
     clist_c,clist_u = [],[]
-    for (x,y,z) in hits.keys():
-      r = np.sqrt(x**2 + y**2)
+    for (r,c) in hits.keys():
+      x,y,z = self.PMTpos[(r,c)]
+      rad = np.sqrt(x**2 + y**2)
       theta = np.arctan(y/x)
       if(x<0 and y>0): theta += np.pi
       if(x<0 and y<0): theta -= np.pi 
-      plotx = r*theta
-      if uncoated[(x,y,z)]:
+      plotx = rad*theta
+      if self.PMTuncoated[(x,y,z)]:
         xlist_u.append(plotx)
         ylist_u.append(z)
-        clist_u.append(hits[(x,y,z)])
+        clist_u.append(hits[(r,c)])
       else:
         xlist_c.append(plotx)
         ylist_c.append(z)
-        clist_c.append(hits[(x,y,z)])
+        clist_c.append(hits[(r,c)])
     
     return xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c
 
   def ResetEDaxes(self,ax):
     
+    cmap = self.GetCmap()
     ax[0].clear()
     ax[1].clear()
     ax[2].clear()
     ax[3].clear()
+    ax[0].set_facecolor(cmap(0))
+    ax[1].set_facecolor(cmap(0))
+    ax[2].set_facecolor(cmap(0))
     ax[0].set_xlim(-95,95)
     ax[0].set_ylim(-95,95)
     ax[1].set_xlim(-360,360)
@@ -138,7 +163,13 @@ class EventDisplay:
     ax[2].set_ylim(-95,95)
     ax[3].set_xlim(-1,1)
     ax[3].set_ylim(-1,1)
-    
+
+  def GetCmap(cmapname=None,n=1001):
+    # Set zero to grey in colormap
+    current_map = plt.get_cmap(lut=n)
+    new_map = current_map(np.linspace(0,1,n))
+    new_map[0] = np.array([160/256, 160/256, 160/256, 1])
+    return ListedColormap(new_map) 
   
   def UpdatePlotAllPMTsTimeSlice(self,
                                  ax,
@@ -159,21 +190,21 @@ class EventDisplay:
     # Top PMTs
     data_top = data_slice.query("HitRow==0")
     xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_top,DetReco=DetReco)
-    ax[0].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=10)
-    ax[0].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax)
+    ax[0].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=vmax,cmap=self.GetCmap())
+    ax[0].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax,cmap=self.GetCmap())
     
     
     # Side PMTs
     data_side = data_slice.query("HitRow>0 and HitRow<6")
     xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataSide(data_side,DetReco=DetReco)
-    ax[1].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=vmax)
-    ax[1].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax)
+    ax[1].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=vmax,cmap=self.GetCmap())
+    ax[1].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax,cmap=self.GetCmap())
     
     # Bottom PMTs
     data_bottom = data_slice.query("HitRow==6")
     xlist_u,ylist_u,clist_u,xlist_c,ylist_c,clist_c = self.GetCoatedUncoatedScatterDataTopBottom(data_bottom,DetReco=DetReco,Top=False)
-    ax[2].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=vmax)
-    ax[2].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax)
+    ax[2].scatter(xlist_u,ylist_u,s=size,c=clist_u,edgecolors='black',linewidths=1,linestyle='--',vmin=0,vmax=vmax,cmap=self.GetCmap())
+    ax[2].scatter(xlist_c,ylist_c,s=size,c=clist_c,edgecolors='black',linewidths=1,vmin=0,vmax=vmax,cmap=self.GetCmap())
   
   def PlotAllPMTsTimeSlice(self,
                            eventno,
@@ -186,7 +217,9 @@ class EventDisplay:
                            DetReco=False):
 
     key = self.keys[eventno]
-    data_pandas = self.MLE_dataset.GetDetectorEvent(eventno)
+    if eventno not in self.detector_events.keys():
+      self.detector_events[eventno] = self.MLE_dataset.GetDetectorEvent(eventno) 
+    data_pandas = self.detector_events[eventno]
     if(ProcessString is not None): 
       data_pandas = data_pandas.query("HitCreatorProcess==@ProcessString")
 
@@ -336,11 +369,20 @@ class EventDisplay:
           plt.subplot2grid(shape=(n,n),loc=(0,2),colspan=1)]
      
     
+    if isinstance(time_bin,int):
+      time_bin = [time_bin]
+
     self.ResetEDaxes(ax)
     for i,loc in enumerate(['top','sides','bottom']):
-      ax[i].scatter(self.avg_xlist_coat[loc],self.avg_ylist_coat[loc],c=self.avg_clist_coat[loc][time_bin],s=size,vmin=0,vmax=vmax,edgecolors='black',linewidths=1)
+      scat_col = np.zeros(np.array(self.avg_clist_coat[loc]).shape[-1])
+      for tb in time_bin:
+        scat_col += np.array(self.avg_clist_coat[loc])[tb,:] 
+      ax[i].scatter(self.avg_xlist_coat[loc],self.avg_ylist_coat[loc],c=scat_col,s=size,vmin=0,vmax=vmax,edgecolors='black',linewidths=1,cmap=self.GetCmap())
     for i,loc in enumerate(['top','sides','bottom']):
-      ax[i].scatter(self.avg_xlist_uncoat[loc],self.avg_ylist_uncoat[loc],c=self.avg_clist_uncoat[loc][time_bin],s=size,vmin=0,vmax=vmax,edgecolors='black',linewidths=1,linestyle='--')
+      scat_col = np.zeros(np.array(self.avg_clist_uncoat[loc]).shape[-1])
+      for tb in time_bin:
+        scat_col += np.array(self.avg_clist_uncoat[loc])[tb,:] 
+      ax[i].scatter(self.avg_xlist_uncoat[loc],self.avg_ylist_uncoat[loc],c=scat_col,s=size,vmin=0,vmax=vmax,edgecolors='black',linewidths=1,linestyle='--',cmap=self.GetCmap())
   
     axes = fig.add_axes([0.67, 0.70, 0.22, 0.03])
     cb = mpl.colorbar.ColorbarBase(axes, orientation='horizontal', 
@@ -348,10 +390,12 @@ class EventDisplay:
                                    label='Number of Hits')
       
     title = ProcessString if ProcessString is not None else 'All Photons'
-    title += '\n{} $<$ t [ns] $<$ {}'.format(self.time_bins[time_bin],self.time_bins[time_bin+1])
+    title += '\n{} $<$ t [ns] $<$ {}'.format(self.time_bins[time_bin[0]],self.time_bins[time_bin[-1]+1])
     ax[3].axis('off')
     ax[3].text(-0.80,0.1,title)
 
+    if(SaveString is not None): plt.savefig(SaveString)
+    
     plt.show()
     
     

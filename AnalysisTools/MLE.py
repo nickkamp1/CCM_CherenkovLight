@@ -9,14 +9,11 @@ hc = 197.3 * 2 * np.pi #eV nm
 def get_idx(t,time_bins):
   return np.argmax(t<time_bins)-1
 
-def smear_time(t,rise_time=2.5):
+def smear_time_PMT(t,rise_time=2.5):
   return t + np.random.normal(loc=rise_time/2,scale=rise_time/2)
-  '''
-  st = -1*np.ones_like(t)
-  while np.any(st < 0):
-    st = np.where(st<0,np.random.normal(loc=t,scale=sigma_t),st)
-  return st
-  '''
+
+def smear_time_TPB(t,TPB_time_const=1.7):
+  return t + np.random.exponential(scale=TPB_time_const)
 
 '''
 Expects a pandas dataframe with information on Hit positions, timing, and wavelength
@@ -49,7 +46,10 @@ class DetectorModel:
 
   def SmearTime(self):
     if self.seed is not None: np.random.seed(self.seed)
-    self.data_pandas['HitTimeSmeared'] = smear_time(self.data_pandas['HitTime'])
+    self.data_pandas['HitTimeSmeared'] = smear_time_PMT(self.data_pandas['HitTime'])
+    self.data_pandas['HitTimeSmeared'] = np.where(self.data_pandas['Coating']=='U',
+                                                  self.data_pandas['HitTimeSmeared'],
+                                                  smear_time_TPB(self.data_pandas['HitTimeSmeared']))
     self.orig_keys += ['HitTimeSmeared']
 
   def FindCoatedPMTs(self):
@@ -61,8 +61,10 @@ class DetectorModel:
   def ApplyTPBeff(self,
                   TPBlow=0.4,
                   TPBhigh=0.66,
-                  TPBgeo=0.4):
+                  TPBgeo=0.4,
+                  TPBvis=0.8):
     self.data_pandas['TPBeff'] = np.where(self.data_pandas['HitWavelength']>200,TPBhigh*TPBgeo,TPBlow*TPBgeo)
+    self.data_pandas['TPBeff'] = np.where(self.data_pandas['HitWavelength']>400,self.data_pandas['TPBeff']*TPBvis,self.data_pandas['TPBeff'])
     self.data_pandas['TPBeff'] = np.where(self.data_pandas['Coating']=='U',1,self.data_pandas['TPBeff'])
 
   # Default QE from Janet
@@ -77,8 +79,8 @@ class DetectorModel:
     self.data_pandas['PMTeff'] = np.where(self.data_pandas['Coating']=='0',PMTQE,self.data_pandas['PMTeff'])
   
   def ApplyDetectorEffects(self):
-    self.SmearTime()
     self.FindCoatedPMTs()
+    self.SmearTime()
     self.ApplyTPBeff()
     self.ApplyPMTeff()
     self.data_pandas['DetEff'] = self.data_pandas['PMTeff'] * self.data_pandas['TPBeff']
@@ -94,7 +96,7 @@ class Dataset:
     self.data_uproot = uproot.open(dataFileName)
     self.keys = self.data_uproot.keys()
     self.time_bins = time_bins
-    self.event_map_dict = {}
+    self.detector_events = {}
 
   def GetDetectorEvent(self,
                        evenno,
@@ -109,17 +111,19 @@ class Dataset:
     return DetModel.data_pandas
   
   def GetEventMap(self,
-                  evenno):
-    if evenno in self.event_map_dict:
-      return self.event_map_dict[evenno]
-    data_pandas = self.GetDetectorEvent(evenno)
-    data_pandas.query("Detected==1",inplace=True)
+                  evenno,
+                  ProcessString=None):
+    if evenno not in self.detector_events.keys():
+      self.detector_events[evenno] = self.GetDetectorEvent(evenno)
+    data_pandas = self.detector_events[evenno]
+    data_pandas = data_pandas.query("Detected==1")
+    if ProcessString:
+      data_pandas = data_pandas.query("HitCreatorProcess==@ProcessString")
     event_map = {}
     for pmt_key,r,c,t in np.array(data_pandas[["Position","HitRow","HitCol","HitTimeSmeared"]]):
       #pmt_key = (r,c)
       if pmt_key not in event_map.keys(): event_map[pmt_key] = np.zeros(len(self.time_bins)-1)
       event_map[pmt_key][get_idx(t,self.time_bins)] += 1
-    self.event_map_dict[evenno] = event_map
     return event_map
 
 
@@ -127,10 +131,11 @@ class Dataset:
   def LogLikelihood(self,
                     evenno,
                     prob_one = None,
-                    template=None):
+                    template=None,
+                    ProcessString=None):
     if not template: template = self.avg_hit_template
     if not prob_one: prob_one = 1./len(self.keys)
-    event_map = self.GetEventMap(evenno)
+    event_map = self.GetEventMap(evenno,ProcessString=ProcessString)
     LLH = 0
     for key,mu_arr in template.items():
       if key not in event_map: k_arr = np.zeros(len(self.time_bins)-1)
