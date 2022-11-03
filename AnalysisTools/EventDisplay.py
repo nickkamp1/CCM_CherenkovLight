@@ -302,8 +302,8 @@ class EventDisplay:
                            template_string=None):
     
     if template_string:
-      pmt_pos = json.loads(codecs.open('/home/nwkamp/Research/CCM/CherenkovLight/AverageTemplates/pmt_pos_template.json','r',encoding='utf-8').read())
-      pmt_coat = json.loads(codecs.open('/home/nwkamp/Research/CCM/CherenkovLight/AverageTemplates/pmt_coat_template.json','r',encoding='utf-8').read())
+      pmt_pos = json.loads(codecs.open('/home/nwkamp/Research/CCM/CherenkovLight/AverageTemplates/10000_event_runs/pmt_pos_template.json','r',encoding='utf-8').read())
+      pmt_coat = json.loads(codecs.open('/home/nwkamp/Research/CCM/CherenkovLight/AverageTemplates/10000_event_runs/pmt_coat_template.json','r',encoding='utf-8').read())
       avg_hit_template = json.loads(codecs.open(template_string,'r',encoding='utf-8').read())
     else: pmt_pos,avg_hit_template,pmt_coat = self.MLE_dataset.GetAverageResponse(nMax=nMax,ProcessString=ProcessString)
     

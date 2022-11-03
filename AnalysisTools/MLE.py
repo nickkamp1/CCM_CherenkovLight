@@ -101,6 +101,8 @@ class Dataset:
   def GetDetectorEvent(self,
                        evenno,
                        seed=None):
+    if evenno in self.detector_events.keys():
+      return self.detector_events[evenno]
     data_pandas = self.data_uproot[self.keys[evenno]].arrays(["HitPosX","HitPosY","HitPosZ","HitRow","HitCol","HitTime","HitEnergy"],library="pd")
     data_pandas["HitCreatorProcess"] = list(self.data_uproot[self.keys[evenno]]["HitCreatorProcess"].array())[0]
     DetModel = DetectorModel(data_pandas,seed=seed)
@@ -108,14 +110,13 @@ class Dataset:
     if seed is not None: np.random.seed(seed)
     det_rand_arr = np.random.uniform(size=len(DetModel.data_pandas))
     DetModel.data_pandas["Detected"] = det_rand_arr < DetModel.data_pandas["DetEff"]
+    self.detector_events[evenno] = DetModel.data_pandas
     return DetModel.data_pandas
   
   def GetEventMap(self,
                   evenno,
                   ProcessString=None):
-    if evenno not in self.detector_events.keys():
-      self.detector_events[evenno] = self.GetDetectorEvent(evenno)
-    data_pandas = self.detector_events[evenno]
+    data_pandas = self.GetDetectorEvent(evenno)
     data_pandas = data_pandas.query("Detected==1")
     if ProcessString:
       data_pandas = data_pandas.query("HitCreatorProcess==@ProcessString")
@@ -123,7 +124,8 @@ class Dataset:
     for pmt_key,r,c,t in np.array(data_pandas[["Position","HitRow","HitCol","HitTimeSmeared"]]):
       #pmt_key = (r,c)
       if pmt_key not in event_map.keys(): event_map[pmt_key] = np.zeros(len(self.time_bins)-1)
-      event_map[pmt_key][get_idx(t,self.time_bins)] += 1
+      tbin = get_idx(t,self.time_bins)
+      if tbin != -1: event_map[pmt_key][tbin] += 1
     return event_map
 
 
